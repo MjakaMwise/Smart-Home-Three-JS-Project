@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Mode</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #000000 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            margin-bottom: 10px;
+            font-size: 32px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 30px;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .control-btn {
+            appearance: button;
+  background-color: #ffffff;
+  background-image: none;
+  border: 1px solid #000;
+  border-radius: 4px;
+  box-shadow: #fff 4px 4px 0 0,#000 4px 4px 0 1px;
+  box-sizing: border-box;
+  color: #000000;
+  cursor: pointer;
+  display: inline-block;
+  font-family: ITCAvantGardeStd-Bk,Arial,sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  margin: 0 5px 10px 0;
+  overflow: visible;
+  padding: 12px 40px;
+  text-align: center;
+  text-transform: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  vertical-align: middle;
+  white-space: nowrap;
+        }
+
+@media (min-width: 768px) {
+  .control-btn {
+    padding: 12px 50px;
+  }
+}
+
+        .control-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            color: white;
+            background: #000000;
+        }
+
+        .control-btn:active {
+            transform: translateY(-1px);
+        }
+
+        .control-btn.triggered {
+            background: #4caf50;
+            color: white;
+        }
+
+        .no-buttons {
+            text-align: center;
+            color: white;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Control House</h1>
+        <p class="subtitle">Tap buttons to Control Items</p>
+        
+        <div id="buttonGrid" class="button-grid">
+            <div class="no-buttons">Loading buttons...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, set, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyD4lx6Je-fD-DdBYCm8NqNoo_ShE5qZdTs",
+            authDomain: "nale-bc514.firebaseapp.com",
+            databaseURL: "https://nale-bc514-default-rtdb.firebaseio.com",
+            projectId: "nale-bc514",
+            storageBucket: "nale-bc514.appspot.com",
+            messagingSenderId: "577549937802",
+            appId: "1:577549937802:web:5008463f47f321fb139173",
+            measurementId: "G-9BQ5L3ZC16"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // Load buttons from Firebase
+        function loadButtons() {
+            const buttonsRef = ref(db, 'buttons');
+            onValue(buttonsRef, (snapshot) => {
+                const buttonGrid = document.getElementById('buttonGrid');
+                buttonGrid.innerHTML = '';
+
+                const data = snapshot.val();
+                if (!data) {
+                    buttonGrid.innerHTML = '<div class="no-buttons">No buttons yet.<br>Add some in the admin page!</div>';
+                    return;
+                }
+
+                Object.keys(data).forEach(key => {
+                    const btn = data[key];
+                    const button = document.createElement('button');
+                    button.className = 'control-btn';
+                    button.textContent = btn.name;
+                    button.dataset.code = btn.code;
+                    button.dataset.name = btn.name;
+                    button.onclick = triggerFunction;
+                    buttonGrid.appendChild(button);
+                });
+            });
+        }
+
+        async function triggerFunction(event) {
+            const button = event.target;
+            const code = button.dataset.code;
+            const name = button.dataset.name;
+
+            const triggerRef = ref(db, 'trigger');
+            await set(triggerRef, {
+                code: code,
+                name: name,
+                timestamp: Date.now()
+            });
+            
+            // // Visual feedback
+            // const originalText = button.textContent;
+            // button.classList.add('triggered');
+            // button.textContent = '✓ Sent!';
+            // setTimeout(() => {
+            //     button.classList.remove('triggered');
+            //     button.textContent = originalText;
+            // }, 500);
+        }
+
+        loadButtons();
+    </script>
+</body>
+</html>

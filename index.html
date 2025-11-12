@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <script>
+        // Device detection and redirect script
+
+function detectDeviceAndRedirect() {
+  // URLs for different devices
+  const mobileUrl = 'control.html';
+  const desktopUrl = 'viewer.html';
+  
+  // Method 1: User Agent Detection (most common)
+  const userAgent = navigator.userAgent.toLowerCase();
+  const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+  
+  // Method 2: Screen width detection (more reliable for tablets)
+  const isSmallScreen = window.innerWidth <= 768;
+  
+  // Method 3: Touch capability detection
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  
+  // Combined detection (customize logic as needed)
+  const isSmartphone = isMobile || (isSmallScreen && isTouchDevice);
+  
+  // Redirect based on device
+  if (isSmartphone) {
+    console.log('Smartphone detected - redirecting to mobile site');
+    window.location.href = mobileUrl;
+  } else {
+    console.log('PC/Desktop detected - redirecting to desktop site');
+    window.location.href = desktopUrl;
+  }
+}
+
+// Run detection on page load
+detectDeviceAndRedirect();
+
+
+// ====== ALTERNATIVE: More detailed detection ======
+
+function getDeviceType() {
+  const ua = navigator.userAgent.toLowerCase();
+  
+  // Check for mobile phones
+  if (/android|webos|iphone|ipod|blackberry|iemobile|opera mini/i.test(ua)) {
+    return 'smartphone';
+  }
+  
+  // Check for tablets (iPads and Android tablets)
+  if (/ipad|android(?!.*mobile)/i.test(ua)) {
+    return 'tablet';
+  }
+  
+  // Default to desktop
+  return 'desktop';
+}
+
+function redirectByDeviceType() {
+  const deviceType = getDeviceType();
+  
+  switch(deviceType) {
+    case 'smartphone':
+      window.location.href = 'https://example.com/mobile';
+      break;
+    case 'tablet':
+      window.location.href = 'https://example.com/tablet';
+      break;
+    case 'desktop':
+      window.location.href = 'https://example.com/desktop';
+      break;
+  }
+}
+
+// Uncomment to use the alternative method:
+// redirectByDeviceType();
+    </script>
+</body>
+</html>

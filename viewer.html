@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Viewer Mode</title>
+     <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+        overflow: hidden;
+      }
+
+      #c {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+
+      #controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        max-width: 380px;
+        display: none;
+        max-height: 90vh;
+        overflow-y: auto;
+      }
+
+      .cbutton {
+        display: block;
+        width: 100%;
+        margin-bottom: 10px;
+        padding: 10px;
+        background: #333;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+
+      .cbutton:hover {
+        background: #555;
+      }
+    </style>
+
+</head>
+<body>
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyD4lx6Je-fD-DdBYCm8NqNoo_ShE5qZdTs",
+            authDomain: "nale-bc514.firebaseapp.com",
+            databaseURL: "https://nale-bc514-default-rtdb.firebaseio.com",
+            projectId: "nale-bc514",
+            storageBucket: "nale-bc514.appspot.com",
+            messagingSenderId: "577549937802",
+            appId: "1:577549937802:web:5008463f47f321fb139173",
+            measurementId: "G-9BQ5L3ZC16"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // Listen for trigger events
+        const triggerRef = ref(db, 'trigger');
+        let lastTimestamp = 0;
+
+        onValue(triggerRef, (snapshot) => {
+            const data = snapshot.val();
+            if (!data || data.timestamp <= lastTimestamp) return;
+
+            lastTimestamp = data.timestamp;
+
+            try {
+                // Execute the code in the background
+                eval(data.code);
+            } catch (error) {
+                console.error('Error executing function:', error);
+            }
+        });
+
+        console.log('Viewer mode active - waiting for triggers...');
+    </script> <canvas id="c"></canvas>
+    <div id="controls">
+      <button id="fview" class="cbutton">FrontView</button>
+      <button id="sview" class="cbutton">SideView</button>
+      <button id="tview" class="cbutton">TopView</button>
+      <button id="lview" class="cbutton">SideViewL</button>
+      <button id="bview" class="cbutton">BackView</button>
+      <button id="openW" class="cbutton">Open Window 1</button>
+      <button id="closeW" class="cbutton">Close Window 1</button>
+      <button id="openW1" class="cbutton">Open Window 2</button>
+      <button id="closeW1" class="cbutton">Close Window 2</button>
+      <button id="openW2" class="cbutton">Open Window 3</button>
+      <button id="closeW2" class="cbutton">Close Window 3</button>
+      <button id="fanToggle" class="cbutton">Toggle Fan</button>
+      <button id="DayToggle" class="cbutton">Day Toggle</button>
+    </div>
+
+    
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+          "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.0/build/index.module.js",
+          "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/index.module.min.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { SUBTRACTION, Brush, Evaluator } from "three-bvh-csg";
+
+      // ===========================
+      // SCENE MANAGER CLASS
+      // ===========================
+      class SceneManager {
+        constructor(canvas) {
+          this.canvas = canvas;
+          this.models = {};
+          this.lights = {};
+          this.cameras = {};
+          this.objects = {};
+          this.loader = new GLTFLoader();
+          this.animationEnabled = false;
+          this.objectCounter = 0;
+          this.selectedObject = null;
+          this.raycaster = new THREE.Raycaster();
+          this.mouse = new THREE.Vector2();
+          this.csgEvaluator = new Evaluator(); // Add CSG evaluator
+          this.ambientIntesnsity = 0.8;
+
+          this.setupRenderer();
+          this.setupScene();
+          this.setupCameras();
+          this.setupLights();
+          this.setupControls();
+          this.setupHelpers();
+          this.setupMouseEvents();
+
+          this.startRenderLoop();
+        }
+
+        setupRenderer() {
+          this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            canvas: this.canvas,
+          });
+          this.renderer.setSize(window.innerWidth, window.innerHeight);
+          this.renderer.shadowMap.enabled = true;
+          this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        }
+
+        setupScene() {
+          this.scene = new THREE.Scene();
+          this.scene.background = new THREE.Color(0x000000);
+          this.scene.fog = new THREE.Fog(0x00000, 2, 120);
+        }
+
+        setupCameras() {
+          this.cameras.main = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+          );
+          this.cameras.main.position.set(0, 5, 15);
+          this.cameras.main.name = "main";
+
+          this.cameras.top = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+          );
+          this.cameras.top.position.set(0, 30, 0);
+          this.cameras.top.lookAt(0, 0, 0);
+          this.cameras.top.name = "top";
+
+          this.cameras.side = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+          );
+          this.cameras.side.position.set(30, 5, 0);
+          this.cameras.side.lookAt(0, 0, 0);
+          this.cameras.side.name = "side";
+
+          this.activeCamera = this.cameras.main;
+        }
+
+        setupLights() {
+          this.lights.point = new THREE.PointLight(0xffffff, 300, 50);
+          this.lights.point.position.set(6, 20, 0); // Just below fan at y:25
+          this.lights.point.castShadow = true;
+          this.scene.add(this.lights.point);
+
+          // let LeshPointLight = new THREE.PointLight(0xffffff, 2000, 2000);
+          // LeshPointLight.castShadow = true;
+          // LeshPointLight.position.set(0, 50, 1);
+          // this.scene.add(LeshPointLight);
+
+          // this.lights.spot = new THREE.SpotLight(0xffffff, 10,200);
+          //         this.lights.spot.position.set(10, 10, 10);
+          //         this.lights.spot.angle = Math.PI / 6;
+          //         this.lights.spot.penumbra = 0.;
+          //         this.lights.spot.castShadow = true;
+          //         this.scene.add(this.lights.spot);
+          //         this.scene.add(this.lights.spot.target);
+          // this.lights.directional = new THREE.DirectionalLight(0xffffff, 1);
+          // this.lights.directional.position.set(-10, 50, 40);
+          // this.lights.directional.castShadow = true;
+          // this.lights.directional.shadow.camera.near = 0.1;
+          // this.lights.directional.shadow.camera.far = 50;
+          // this.lights.directional.shadow.camera.left = -20;
+          // this.lights.directional.shadow.camera.right = 20;
+          // this.lights.directional.shadow.camera.top = 20;
+          // this.lights.directional.shadow.camera.bottom = -20;
+          // this.scene.add(this.lights.directional);
+          this.lights.ambient = new THREE.AmbientLight(
+            0xfffffff,
+            this.ambientIntesnsity
+          );
+          this.scene.add(this.lights.ambient);
+        }
+
+        setAmbientIntensity(intensity) {
+          this.ambientIntesnsity = intensity; // Update property
+          this.lights.ambient.intensity = intensity; // Apply immediately
+        }
+        setupControls() {
+          this.controls = new OrbitControls(this.activeCamera, this.canvas);
+          this.controls.enableDamping = true;
+          this.controls.dampingFactor = 0.05;
+          this.controls.minDistance = 5;
+          this.controls.maxDistance = 50;
+          this.displayCameraCoordinates();
+        }
+
+        setupHelpers() {
+          const axesHelper = new THREE.AxesHelper(5);
+          this.scene.add(axesHelper);
+
+          const pointLightHelper = new THREE.PointLightHelper(
+            this.lights.point,
+            0.5
+          );
+
+          this.helpers = { pointLightHelper };
+        }
+
+        setupMouseEvents() {
+          this.canvas.addEventListener(
+            "click",
+            (e) => this.onCanvasClick(e),
+            false
+          );
+        }
+
+        onCanvasClick(event) {
+          const rect = this.canvas.getBoundingClientRect();
+          this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+          this.raycaster.setFromCamera(this.mouse, this.activeCamera);
+
+          const selectableObjects = Object.values(this.objects).filter(
+            (obj) => obj.userData.selectable !== false
+          );
+
+          const intersects = this.raycaster.intersectObjects(
+            selectableObjects,
+            false
+          );
+
+          if (intersects.length > 0) {
+            this.selectObject(intersects[0].object);
+          }
+        }
+
+        selectObject(object) {
+          if (this.selectedObject) {
+            this.selectedObject.userData.originalColor =
+              this.selectedObject.userData.originalColor ||
+              this.selectedObject.material.color.getHex();
+            this.selectedObject.material.color.setHex(
+              this.selectedObject.userData.originalColor
+            );
+            this.selectedObject.material.emissive.setHex(0x000000);
+          }
+
+          this.selectedObject = object;
+
+          if (this.selectedObject) {
+            this.selectedObject.userData.originalColor =
+              this.selectedObject.material.color.getHex();
+            this.selectedObject.material.emissive.setHex(0x333333);
+
+            if (window.demo) {
+              window.demo.onObjectSelected(object);
+            }
+          }
+        }
+
+        // NEW METHOD: Create wall with windows using CSG
+        addWallWithWindows(
+          width,
+          height,
+          depth,
+          windows = [],
+          materialOptions = {}
+        ) {
+          const wallGeometry = new THREE.BoxGeometry(width, height, depth);
+          const wallBrush = new Brush(wallGeometry);
+          wallBrush.updateMatrixWorld();
+
+          let resultBrush = wallBrush;
+
+          // Subtract each window
+          windows.forEach((win) => {
+            const windowGeometry = new THREE.BoxGeometry(
+              win.width || 3,
+              win.height || 4,
+              depth + 1 // Slightly deeper to ensure clean cut
+            );
+            const windowBrush = new Brush(windowGeometry);
+            windowBrush.position.set(win.x || 0, win.y || 0, win.z || 0);
+            windowBrush.updateMatrixWorld();
+
+            resultBrush = this.csgEvaluator.evaluate(
+              resultBrush,
+              windowBrush,
+              SUBTRACTION
+            );
+          });
+
+          // Create mesh from result
+          const material = new THREE.MeshStandardMaterial({
+            color: materialOptions.color || 0xfffafa,
+            side: THREE.DoubleSide,
+            ...materialOptions,
+          });
+
+          const mesh = new THREE.Mesh(resultBrush.geometry, material);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+
+          const name = `wall_${this.objectCounter++}`;
+          mesh.name = name;
+          mesh.userData.selectable = false;
+
+          this.scene.add(mesh);
+          this.objects[name] = mesh;
+
+          return mesh;
+        }
+
+        addPrimitiveObject(geometry, materialOptions = {}) {
+          const material = new THREE.MeshStandardMaterial({
+            color: materialOptions.color || 0x00ff00,
+            metalness: materialOptions.metalness || 0.3,
+            roughness: materialOptions.roughness || 0.7,
+            ...materialOptions,
+          });
+
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.position.y = 2;
+
+          const name = `object_${this.objectCounter++}`;
+          mesh.name = name;
+          mesh.userData.selectable = true;
+
+          this.scene.add(mesh);
+          this.objects[name] = mesh;
+
+          return mesh;
+        }
+
+        addCube(size = 2, color = null) {
+          const geometry = new THREE.BoxGeometry(size, size, size);
+          return this.addPrimitiveObject(geometry, {
+            color: color || Math.random() * 0xffffff,
+          });
+        }
+
+        addSphere(radius = 1.5, color = null) {
+          const geometry = new THREE.SphereGeometry(radius, 32, 32);
+          return this.addPrimitiveObject(geometry, {
+            color: color || Math.random() * 0xffffff,
+          });
+        }
+
+        addCylinder(radiusTop = 1, radiusBottom = 1, height = 3, color = null) {
+          const geometry = new THREE.CylinderGeometry(
+            radiusTop,
+            radiusBottom,
+            height,
+            32
+          );
+          return this.addPrimitiveObject(geometry, {
+            color: color || Math.random() * 0xffffff,
+          });
+        }
+
+        addCamera(name, type = "perspective", options = {}) {
+          let camera;
+
+          if (type === "perspective") {
+            camera = new THREE.PerspectiveCamera(
+              options.fov || 75,
+              window.innerWidth / window.innerHeight,
+              options.near || 0.1,
+              options.far || 1000
+            );
+          }
+
+          if (options.position) {
+            camera.position.set(...options.position);
+          }
+          if (options.lookAt) {
+            camera.lookAt(...options.lookAt);
+          }
+
+          camera.name = name;
+          this.cameras[name] = camera;
+
+          return camera;
+        }
+
+        switchCamera(name) {
+          if (this.cameras[name]) {
+            this.activeCamera = this.cameras[name];
+            this.controls.object = this.activeCamera;
+            this.controls.update();
+            return true;
+          }
+          return false;
+        }
+
+        removeCamera(name) {
+          if (name === "main" || name === "top" || name === "side") {
+            return false;
+          }
+
+          if (this.cameras[name]) {
+            if (this.activeCamera === this.cameras[name]) {
+              this.switchCamera("main");
+            }
+            delete this.cameras[name];
+            return true;
+          }
+          return false;
+        }
+
+        getObject(name) {
+          return this.objects[name];
+        }
+
+        getLight(name) {
+          return this.lights[name];
+        }
+
+        getCamera(name) {
+          return this.cameras[name];
+        }
+
+        getAllObjects() {
+          return { ...this.objects };
+        }
+
+        setPosition(objectName, x, y, z) {
+          const obj = this.getObject(objectName);
+          if (obj) {
+            obj.position.set(x, y, z);
+          }
+        }
+
+        setRotation(objectName, x, y, z) {
+          const obj = this.getObject(objectName);
+          if (obj) {
+            obj.rotation.set(x, y, z);
+          }
+        }
+
+        setScale(objectName, x, y, z) {
+          const obj = this.getObject(objectName);
+          if (obj) {
+            obj.scale.set(x, y, z);
+          }
+        }
+
+        removeObject(name) {
+          const obj = this.objects[name];
+          if (obj) {
+            if (this.selectedObject === obj) {
+              this.selectedObject = null;
+            }
+
+            this.scene.remove(obj);
+            delete this.objects[name];
+
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) {
+              if (Array.isArray(obj.material)) {
+                obj.material.forEach((mat) => mat.dispose());
+              } else {
+                obj.material.dispose();
+              }
+            }
+          }
+        }
+
+        setBackground(color) {
+          this.scene.background = new THREE.Color(color);
+        }
+
+        clearAllObjects() {
+          Object.keys(this.objects).forEach((name) => {
+            this.removeObject(name);
+          });
+          this.selectedObject = null;
+        }
+
+        startRenderLoop() {
+          const animate = () => {
+            requestAnimationFrame(animate);
+            this.controls.update();
+
+            if (this.animationEnabled) {
+              this.updateAnimations();
+            }
+
+            this.handleResize();
+            this.renderer.render(this.scene, this.activeCamera);
+          };
+
+          animate();
+        }
+
+        updateAnimations() {
+          const time = Date.now() * 0.001;
+
+          Object.values(this.objects).forEach((obj, index) => {
+            if (obj !== this.selectedObject) {
+              obj.rotation.x += 0.01;
+              obj.rotation.y += 0.01;
+              obj.position.y = 2 + Math.sin(time + index) * 0.5;
+            }
+          });
+        }
+
+        handleResize() {
+          const canvas = this.renderer.domElement;
+          const width = canvas.clientWidth;
+          const height = canvas.clientHeight;
+
+          if (canvas.width !== width || canvas.height !== height) {
+            this.renderer.setSize(width, height, false);
+
+            Object.values(this.cameras).forEach((camera) => {
+              if (camera instanceof THREE.PerspectiveCamera) {
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+              }
+            });
+          }
+        }
+        displayCameraCoordinates() {
+          // Create or get coordinate display element
+          let coordDisplay = document.getElementById("coord-display");
+          if (!coordDisplay) {
+            coordDisplay = document.createElement("div");
+            coordDisplay.id = "coord-display";
+            coordDisplay.style.cssText = `
+      margin-top: 15px;
+      padding: 10px;
+      background: #1a1a1a;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    `;
+            document.getElementById("controls").appendChild(coordDisplay);
+          }
+
+          // Update function
+          const updateCoords = () => {
+            const cam = this.activeCamera;
+            const target = this.controls.target;
+
+            coordDisplay.innerHTML = `
+      <strong>Camera Position:</strong><br>
+      x: ${cam.position.x.toFixed(2)}<br>
+      y: ${cam.position.y.toFixed(2)}<br>
+      z: ${cam.position.z.toFixed(2)}<br>
+      <br>
+      <strong>Look At Target:</strong><br>
+      x: ${target.x.toFixed(2)}<br>
+      y: ${target.y.toFixed(2)}<br>
+      z: ${target.z.toFixed(2)}
+    `;
+          };
+
+          // Update on control changes
+          this.controls.addEventListener("change", updateCoords);
+
+          // Initial update
+          updateCoords();
+        }
+        selectObject(object) {
+          if (this.selectedObject) {
+            this.selectedObject.userData.originalColor =
+              this.selectedObject.userData.originalColor ||
+              this.selectedObject.material.color.getHex();
+            this.selectedObject.material.color.setHex(
+              this.selectedObject.userData.originalColor
+            );
+            this.selectedObject.material.emissive.setHex(0x000000);
+          }
+
+          this.selectedObject = object;
+
+          if (this.selectedObject) {
+            this.selectedObject.userData.originalColor =
+              this.selectedObject.material.color.getHex();
+            this.selectedObject.material.emissive.setHex(0x333333);
+
+            if (window.demo) {
+              window.demo.onObjectSelected(object);
+            }
+          }
+        }
+
+        // NEW METHOD: Create light cone
+        addLightCone(options = {}) {
+          const {
+            radiusTop = 0.5, // Cone top radius
+            radiusBottom = 3, // Cone bottom radius (spread)
+            height = 8, // Cone height (beam length)
+            color = 0xffff00, // Light color (yellow default)
+            opacity = 0.4, // Transparency (0-1)
+            brightness = 1, // Emissive intensity
+            position = { x: 0, y: 10, z: 0 }, // Starting position
+            radialSegments = 32, // Smoothness
+          } = options;
+
+          // Create cone geometry
+          const geometry = new THREE.ConeGeometry(
+            radiusBottom,
+            height,
+            radialSegments,
+            1,
+            true // open ended
+          );
+
+          // Create transparent glowing material
+          const material = new THREE.MeshStandardMaterial({
+            color: color,
+            transparent: true,
+            opacity: opacity,
+            side: THREE.DoubleSide,
+            emissive: new THREE.Color(color),
+            emissiveIntensity: brightness,
+            metalness: 0,
+            roughness: 1,
+            blending: THREE.AdditiveBlending, // Creates glow effect
+            depthWrite: false, // Prevents z-fighting
+          });
+
+          const cone = new THREE.Mesh(geometry, material);
+
+          // Position and rotate (cones point up by default, we want down)
+          cone.position.set(position.x, position.y, position.z);
+          cone.rotation.y = Math.PI; // Flip to point downward
+
+          // Store metadata
+          const name = `lightcone_${this.objectCounter++}`;
+          cone.name = name;
+          cone.userData.isLightCone = true;
+          cone.userData.selectable = false;
+          cone.userData.originalOpacity = opacity;
+
+          this.scene.add(cone);
+          this.objects[name] = cone;
+
+          return cone;
+        }
+
+        // Toggle light cone visibility
+        toggleLightCone(coneObject, duration = 300) {
+          if (!coneObject || !coneObject.userData.isLightCone) return;
+
+          const targetOpacity =
+            coneObject.material.opacity > 0
+              ? 0
+              : coneObject.userData.originalOpacity;
+          const startOpacity = coneObject.material.opacity;
+          const startTime = Date.now();
+
+          const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            coneObject.material.opacity =
+              startOpacity + (targetOpacity - startOpacity) * progress;
+
+            if (progress < 1) {
+              requestAnimationFrame(animate);
+            }
+          };
+
+          animate();
+        }
+        addGLBModel(filePath, options = {}) {
+          return new Promise((resolve, reject) => {
+            this.loader.load(
+              filePath,
+              (gltf) => {
+                const model = gltf.scene;
+
+                // Position
+                if (options.position) {
+                  model.position.set(...options.position);
+                }
+
+                // Scale
+                if (options.scale) {
+                  model.scale.set(options.scale, options.scale, options.scale);
+                }
+
+                // Rotation
+                if (options.rotation) {
+                  model.rotation.set(...options.rotation);
+                }
+
+                // Add to scene
+                this.scene.add(model);
+
+                // Store reference
+                const name = options.name || `model_${this.objectCounter++}`;
+                model.name = name;
+                this.objects[name] = model;
+
+                resolve({ model, animations: gltf.animations });
+              },
+              (progress) => {
+                console.log(
+                  "Loading:",
+                  (progress.loaded / progress.total) * 100 + "%"
+                );
+              },
+              (error) => {
+                console.error("Error loading GLB:", error);
+                reject(error);
+              }
+            );
+          });
+        }
+      }
+
+      //Animate GLB items
+
+      // Add this function to your code (outside SceneManager or as a standalone function)
+      function animateModelPosition(model, options = {}) {
+        const {
+          from = { x: 0, y: 0, z: 0 }, // Starting position
+          to = { x: 0, y: 0, z: 0 }, // Ending position
+          duration = 2, // Duration in seconds
+          loop = false, // Should it loop?
+          yoyo = false, // Reverse back and forth (requires loop: true)
+          easing = "linear", // 'linear', 'easeInOut', 'easeIn', 'easeOut'
+          onComplete = null, // Callback when animation finishes
+        } = options;
+
+        const startTime = Date.now();
+        const durationMs = duration * 1000;
+
+        // Set initial position
+        model.position.set(from.x, from.y, from.z);
+
+        // Easing functions
+        const easingFunctions = {
+          linear: (t) => t,
+          easeInOut: (t) =>
+            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+          easeIn: (t) => t * t * t,
+          easeOut: (t) => 1 - Math.pow(1 - t, 3),
+        };
+
+        const easeFn = easingFunctions[easing] || easingFunctions.linear;
+
+        let isReversing = false;
+        let cycles = 0;
+
+        function animate() {
+          const elapsed = Date.now() - startTime;
+          let progress = Math.min(elapsed / durationMs, 1);
+
+          // Handle yoyo (back and forth)
+          if (yoyo && loop) {
+            const cycleProgress = (elapsed % (durationMs * 2)) / durationMs;
+            progress = cycleProgress > 1 ? 2 - cycleProgress : cycleProgress;
+          }
+
+          const eased = easeFn(progress);
+
+          // Interpolate position
+          model.position.x = from.x + (to.x - from.x) * eased;
+          model.position.y = from.y + (to.y - from.y) * eased;
+          model.position.z = from.z + (to.z - from.z) * eased;
+
+          // Continue animation
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            // Animation complete
+            if (loop) {
+              if (yoyo) {
+                // Yoyo continues automatically
+                requestAnimationFrame(animate);
+              } else {
+                // Reset and loop
+                model.position.set(from.x, from.y, from.z);
+                startTime = Date.now();
+                requestAnimationFrame(animate);
+              }
+            } else {
+              // One-time animation finished
+              if (onComplete) onComplete();
+            }
+          }
+        }
+
+        animate();
+
+        // Return control object to stop animation if needed
+        return {
+          stop: () => {
+            // Set flag to stop (you'd need to check this in animate)
+            loop = false;
+          },
+        };
+      }
+
+      // Rotation animation function with speed control (perfect for fans!)
+      function animateModelRotation(model, options = {}) {
+        const {
+          from = { x: 0, y: 0, z: 0 }, // Starting rotation (radians)
+          to = { x: 0, y: 0, z: 0 }, // Ending rotation (radians)
+          duration = 2, // Duration in seconds (for non-continuous)
+          speed = 1, // Rotation speed (revolutions per second)
+          loop = false, // Should it loop?
+          continuous = false, // Continuous rotation (ignores from/to, uses speed)
+          yoyo = false, // Reverse back and forth (requires loop: true)
+          easing = "linear", // 'linear', 'easeInOut', 'easeIn', 'easeOut'
+          axis = "y", // Which axis to rotate: 'x', 'y', 'z'
+          onComplete = null, // Callback when animation finishes
+          accelerate = false, // Gradually speed up to target speed
+          accelerationTime = 2, // Time to reach full speed (seconds)
+        } = options;
+
+        const startTime = Date.now();
+        const durationMs = duration * 1000;
+        const accelerationMs = accelerationTime * 1000;
+
+        let currentSpeed = accelerate ? 0 : speed;
+        let animationId = null;
+        let stopped = false;
+
+        // Set initial rotation
+        if (!continuous) {
+          model.rotation.set(from.x, from.y, from.z);
+        }
+
+        // Easing functions
+        const easingFunctions = {
+          linear: (t) => t,
+          easeInOut: (t) =>
+            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+          easeIn: (t) => t * t * t,
+          easeOut: (t) => 1 - Math.pow(1 - t, 3),
+        };
+
+        const easeFn = easingFunctions[easing] || easingFunctions.linear;
+
+        function animateContinuous() {
+          if (stopped) return;
+
+          const elapsed = Date.now() - startTime;
+
+          // Handle acceleration
+          if (accelerate && elapsed < accelerationMs) {
+            const accelProgress = elapsed / accelerationMs;
+            currentSpeed = speed * easeFn(accelProgress);
+          } else {
+            currentSpeed = speed;
+          }
+
+          // Rotate based on speed (radians per frame)
+          const rotationIncrement = currentSpeed * Math.PI * 2 * (1 / 60); // Assuming 60fps
+
+          if (axis === "x") {
+            model.rotation.x += rotationIncrement;
+          } else if (axis === "y") {
+            model.rotation.y += rotationIncrement;
+          } else if (axis === "z") {
+            model.rotation.z += rotationIncrement;
+          }
+
+          animationId = requestAnimationFrame(animateContinuous);
+        }
+
+        function animateNormal() {
+          if (stopped) return;
+
+          const elapsed = Date.now() - startTime;
+          let progress = Math.min(elapsed / durationMs, 1);
+
+          // Handle yoyo (back and forth)
+          if (yoyo && loop) {
+            const cycleProgress = (elapsed % (durationMs * 2)) / durationMs;
+            progress = cycleProgress > 1 ? 2 - cycleProgress : cycleProgress;
+          }
+
+          const eased = easeFn(progress);
+
+          // Interpolate rotation
+          model.rotation.x = from.x + (to.x - from.x) * eased;
+          model.rotation.y = from.y + (to.y - from.y) * eased;
+          model.rotation.z = from.z + (to.z - from.z) * eased;
+
+          // Continue animation
+          if (progress < 1) {
+            animationId = requestAnimationFrame(animateNormal);
+          } else {
+            // Animation complete
+            if (loop) {
+              if (yoyo) {
+                animationId = requestAnimationFrame(animateNormal);
+              } else {
+                model.rotation.set(from.x, from.y, from.z);
+                startTime = Date.now();
+                animationId = requestAnimationFrame(animateNormal);
+              }
+            } else {
+              if (onComplete) onComplete();
+            }
+          }
+        }
+
+        // Start the appropriate animation
+        if (continuous) {
+          animateContinuous();
+        } else {
+          animateNormal();
+        }
+
+        // Return control object
+        return {
+          stop: () => {
+            stopped = true;
+            if (animationId) {
+              cancelAnimationFrame(animationId);
+            }
+          },
+          setSpeed: (newSpeed) => {
+            speed = newSpeed;
+            currentSpeed = newSpeed;
+          },
+          getSpeed: () => currentSpeed,
+          pause: () => {
+            stopped = true;
+            if (animationId) {
+              cancelAnimationFrame(animationId);
+            }
+          },
+          resume: () => {
+            stopped = false;
+            if (continuous) {
+              animateContinuous();
+            } else {
+              animateNormal();
+            }
+          },
+        };
+      }
+      //End Of Animate Glb items
+      // ===========================
+      let T = new SceneManager(document.querySelector("#c"));
+
+      T.setBackground(0xffffff);
+      let DayAndNightToggle = document.getElementById("DayToggle");
+      let isDay = true;
+
+      DayAndNightToggle.addEventListener("click", () => {
+        if (isDay) {
+          // Night mode
+          T.setBackground(0x000000); // Dark blue instead of pure black
+          T.lights.ambient.intensity = 0; // Dim ambient light
+          isDay = false;
+        } else {
+          // Day mode
+          T.setBackground(0xfffffff); // Sky blue
+          T.lights.ambient.intensity = 0.8; // Bright ambient light
+          isDay = true;
+        }
+      });
+
+      // Set up custom cameras
+      class Cameras {
+        constructor([
+          {
+            Camtype,
+            name,
+            position: { x: px, y: py, z: pz },
+            lookAt: { x: lx, y: ly, z: lz },
+          },
+        ]) {
+          this.cameras = {};
+          this.createCameras();
+        }
+        createCameras() {
+          for (let cam of cameraPositions) {
+            let newCam = T.addCamera(cam.name, "perspective", {
+              position: [cam.position.x, cam.position.y, cam.position.z],
+              lookAt: [0, 0, 0],
+            });
+            this.cameras[cam.name] = newCam;
+          }
+        }
+        CamActive(camName) {
+          T.switchCamera(camName);
+        }
+      }
+
+      let cameraPositions = [
+        {
+          Camtype: "perspective",
+          name: "SittingRoomTopViewFront",
+          position: { x: 0, y: 25, z: 30 },
+          lookAt: { x: 0, y: 0, z: 0 },
+        },
+        {
+          Camtype: "perspective",
+          name: "SideViewR",
+          position: { x: 30, y: 10, z: 0 },
+          lookAt: { x: 0, y: 0, z: 0 },
+        },
+        {
+          Camtype: "perspective",
+          name: "top",
+          position: { x: 0, y: 40, z: 0 },
+          lookAt: { x: 0, y: 0, z: 0 },
+        },
+        {
+          Camtype: "perspective",
+          name: "SideViewL",
+          position: { x: -30, y: 10, z: 0 },
+          lookAt: { x: 0, y: 0, z: 0 },
+        },
+        {
+          Camtype: "perspective",
+          name: "SittingRoomTopViewBack",
+          position: { x: 0, y: 25, z: -30 },
+          lookAt: { x: 0, y: 0, z: 0 },
+        },
+        {
+          Camtype: "perspective",
+          name: "SettingView",
+          position: { x: -25, y: 32, z: -1},
+          lookAt: { x: 6, y: 7.26, z: 3.18 },
+        },
+      ];
+      let Cam = new Cameras(cameraPositions);
+
+      Cam.CamActive("SettingView");
+      // ===========================
+// SECTION 1: EXPOSE GLOBAL FUNCTIONS
+// Add this code AFTER creating T (SceneManager) and AFTER defining smoothSwitchCamera
+// Place it right before the "BUILD THE ROOM WITH WINDOWS" section
+// ===========================
+
+// Expose the SceneManager instance
+window.T = T;
+
+// ===== CAMERA CONTROLS =====
+window.switchToFrontView = () => {
+  smoothSwitchCamera("SittingRoomTopViewFront", 1500);
+};
+
+window.switchToSideViewR = () => {
+  smoothSwitchCamera("SideViewR", 1500);
+};
+
+window.switchToTopView = () => {
+  smoothSwitchCamera("top", 1500);
+};
+
+window.switchToSideViewL = () => {
+  smoothSwitchCamera("SideViewL", 1500);
+};
+
+window.switchToBackView = () => {
+  smoothSwitchCamera("SittingRoomTopViewBack", 1500);
+};
+
+window.switchToSettingView = () => {
+  smoothSwitchCamera("SettingView", 1500);
+};
+
+// Expose day/night function
+window.toggleDayNight = () => {
+  if (isDay) {
+    // Night mode
+    T.setBackground(0x000000);
+    T.setAmbientIntensity(0);
+    isDay = false;
+  } else {
+    // Day mode
+    T.setBackground(0xffffff);
+    T.setAmbientIntensity(0.8);
+    isDay = true;
+  }
+};
+
+window.setDayMode = () => {
+  T.setBackground(0xffffff);
+  T.setAmbientIntensity(0.8);
+  isDay = true;
+};
+
+window.setNightMode = () => {
+  T.setBackground(0x000000);
+  T.setAmbientIntensity(0);
+  isDay = false;
+};
+
+// Keep original button listener
+DayAndNightToggle.addEventListener("click", window.toggleDayNight);
+
+// ===== LIGHTING CONTROLS =====
+window.setAmbientLight = (intensity) => {
+  T.setAmbientIntensity(intensity);
+};
+
+window.setPointLightPosition = (x, y, z) => {
+  T.lights.point.position.set(x, y, z);
+};
+
+window.setPointLightIntensity = (intensity) => {
+  T.lights.point.intensity = intensity;
+};
+
+window.setPointLightColor = (hexColor) => {
+  T.lights.point.color.setHex(hexColor);
+};
+
+// ===== BACKGROUND CONTROLS =====
+window.setBackgroundColor = (hexColor) => {
+  T.setBackground(hexColor);
+};
+
+window.setBackgroundRed = () => T.setBackground(0xff0000);
+window.setBackgroundBlue = () => T.setBackground(0x0000ff);
+window.setBackgroundGreen = () => T.setBackground(0x00ff00);
+window.setBackgroundWhite = () => T.setBackground(0xffffff);
+window.setBackgroundBlack = () => T.setBackground(0x000000);
+
+// ===== ADVANCED CAMERA CONTROLS =====
+window.setCameraPosition = (x, y, z) => {
+  T.activeCamera.position.set(x, y, z);
+  T.controls.update();
+};
+
+window.setCameraTarget = (x, y, z) => {
+  T.controls.target.set(x, y, z);
+  T.controls.update();
+};
+
+// ===== SCENE MANAGEMENT =====
+window.clearAllObjects = () => {
+  T.clearAllObjects();
+};
+
+// ===== PLACEHOLDERS FOR MODEL CONTROLS =====
+// These will be assigned when models load (see Section 2)
+window.openCurtain1 = null;
+window.closeCurtain1 = null;
+window.openCurtain2 = null;
+window.closeCurtain2 = null;
+window.openCurtain3 = null;
+window.closeCurtain3 = null;
+window.toggleFan = null;
+window.fanOn = null;
+window.fanOff = null;
+window.setFanSpeed = null;
+window.toggleLampA = null;
+window.lampAOn = null;
+window.lampAOff = null;
+
+// ===== MODEL REFERENCES =====
+// These will be assigned when models load
+window.mySofa = null;
+window.mySofa2 = null;
+window.myDiningTable = null;
+window.myTV = null;
+window.myGrass = null;
+window.myGlassTable = null;
+window.myFan = null;
+
+// ===== UTILITY FUNCTIONS =====
+window.logCameraPosition = () => {
+  const cam = T.activeCamera;
+  console.log(`Camera Position: x:${cam.position.x.toFixed(2)}, y:${cam.position.y.toFixed(2)}, z:${cam.position.z.toFixed(2)}`);
+  console.log(`Target: x:${T.controls.target.x.toFixed(2)}, y:${T.controls.target.y.toFixed(2)}, z:${T.controls.target.z.toFixed(2)}`);
+};
+
+window.listAllObjects = () => {
+  console.log("Available Objects:", Object.keys(T.objects));
+};
+
+window.listAllLights = () => {
+  console.log("Available Lights:", Object.keys(T.lights));
+};
+
+window.listAllCameras = () => {
+  console.log("Available Cameras:", Object.keys(T.cameras));
+};
+
+console.log("✅ All scene controls exposed to window");
+console.log("Use: switchToFrontView(), toggleFan(), openCurtain1(), etc.");
+      // Smooth camera transition function
+      function smoothSwitchCamera(targetCameraName, duration = 1500) {
+        const currentCamera = T.activeCamera;
+        const targetCamera = T.cameras[targetCameraName];
+
+        if (!targetCamera) {
+          console.error("Camera not found:", targetCameraName);
+          return;
+        }
+
+        const startPos = {
+          x: currentCamera.position.x,
+          y: currentCamera.position.y,
+          z: currentCamera.position.z,
+        };
+
+        const startTarget = {
+          x: T.controls.target.x,
+          y: T.controls.target.y,
+          z: T.controls.target.z,
+        };
+
+        const endPos = {
+          x: targetCamera.position.x,
+          y: targetCamera.position.y,
+          z: targetCamera.position.z,
+        };
+
+        const endTarget = { x: 0, y: 0, z: 0 };
+
+        const startTime = Date.now();
+
+        function animate() {
+          const elapsed = Date.now() - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+
+          const eased =
+            progress < 0.5
+              ? 4 * progress * progress * progress
+              : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+          currentCamera.position.x =
+            startPos.x + (endPos.x - startPos.x) * eased;
+          currentCamera.position.y =
+            startPos.y + (endPos.y - startPos.y) * eased;
+          currentCamera.position.z =
+            startPos.z + (endPos.z - startPos.z) * eased;
+
+          T.controls.target.x =
+            startTarget.x + (endTarget.x - startTarget.x) * eased;
+          T.controls.target.y =
+            startTarget.y + (endTarget.y - startTarget.y) * eased;
+          T.controls.target.z =
+            startTarget.z + (endTarget.z - startTarget.z) * eased;
+
+          T.controls.update();
+
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          }
+        }
+
+        animate();
+      }
+
+      // BUILD THE ROOM WITH WINDOWS
+      {
+        let wallsHeight = 20;
+
+        // Front wall with 2 windows
+        let WallA = T.addWallWithWindows(
+          40,
+          wallsHeight,
+          1,
+          [
+            { x: -8, y: 0, z: 0, width: 5, height: 6 },
+            { x: 8, y: 0, z: 0, width: 5, height: 6 },
+          ],
+          { color: 0x8b4512 }
+        );
+        WallA.position.set(0, wallsHeight / 2, -20);
+
+        // Back wall with 1 large window
+        let WallD = T.addWallWithWindows(
+          40,
+          wallsHeight,
+          1,
+          [{ x: 0, y: 0, z: 0, width: 8, height: 7 }],
+          { color: 0x8b4513 }
+        );
+        WallD.position.set(0, wallsHeight / 2, 20);
+
+        // Right wall (solid, no windows)
+        let WallC = T.addCube(1, 0x8b4513);
+        WallC.scale.set(1, wallsHeight, 40);
+        WallC.position.set(20, wallsHeight / 2, 0);
+
+        // Floor
+        let Floor = T.addCube(1, 0xf0ffff);
+        Floor.scale.set(40, 1, 40);
+        Floor.position.set(0, 0, 0);
+
+        //Floor 2
+        let Floor2 = T.addCube(2, 0xf0dfdd);
+        Floor2.scale.set(80, 0, 80);
+        Floor2.position.set(0, 0, 0);
+      }
+
+      // Button event listenefrs
+      {
+        let fview = document.getElementById("fview");
+        fview.addEventListener("click", () => {
+          smoothSwitchCamera("SittingRoomTopViewFront", 1500);
+        });
+
+        window.Switch =  function Switch() {
+          smoothSwitchCamera("SettingView", 1500);
+        }
+        let sview = document.getElementById("sview");
+        sview.addEventListener("click", () => {
+          smoothSwitchCamera("SideViewR", 1500);
+        });
+
+        let tview = document.getElementById("tview");
+        tview.addEventListener("click", () => {
+          smoothSwitchCamera("top", 1500);
+        });
+
+        let lview = document.getElementById("lview");
+        lview.addEventListener("click", () => {
+          smoothSwitchCamera("SideViewL", 1500);
+        });
+
+        let bview = document.getElementById("bview");
+        bview.addEventListener("click", () => {
+          smoothSwitchCamera("SittingRoomTopViewBack", 1500);
+        });
+      }
+
+      //OSitting Room Items
+
+      // ===========================
+// SECTION 2: ASSIGN FUNCTIONS WHEN MODELS LOAD
+// Place these INSIDE each model's .then() block
+// ===========================
+
+// FOR KITI SOFA 1 MODEL (with lamp)
+T.addGLBModel("kiti.glb", {
+  position: [3, -7.55, -6],
+  scale: 300,
+  name: "mySofa",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose sofa reference
+  window.mySofa = model;
+
+  T.addGLBModel("lamp.glb", {
+    position: [-20, -6, -20],
+    scale: 200,
+    name: "myLampA",
+  }).then(({ model, animations }) => {
+    // Main spotlight (downward beam)
+    const spotLight = new THREE.SpotLight(
+      0xffd700,
+      120,
+      20,
+      Math.PI / 6,
+      0.5
+    );
+    spotLight.position.set(-20, -3, -20);
+    spotLight.target.position.set(-20, -10, -20);
+    spotLight.castShadow = true;
+
+    // Ambient glow around lamp
+    const glowLight = new THREE.PointLight(0xffd700, 30, 8);
+    glowLight.position.set(-20, 0, -20);
+
+    T.scene.add(spotLight);
+    T.scene.add(spotLight.target);
+    T.scene.add(glowLight);
+
+    // Store both for toggling
+    T.lights.lampA = { spot: spotLight, glow: glowLight };
+    
+    // ===== EXPOSE LAMP CONTROLS =====
+    let isLampOn = true;
+    window.toggleLampA = () => {
+      if (isLampOn) {
+        spotLight.intensity = 0;
+        glowLight.intensity = 0;
+        isLampOn = false;
+      } else {
+        spotLight.intensity = 120;
+        glowLight.intensity = 30;
+        isLampOn = true;
+      }
+    };
+    
+    window.lampAOn = () => {
+      spotLight.intensity = 120;
+      glowLight.intensity = 30;
+      isLampOn = true;
+    };
+    
+    window.lampAOff = () => {
+      spotLight.intensity = 0;
+      glowLight.intensity = 0;
+      isLampOn = false;
+    };
+  });
+});
+
+// FOR KITI SOFA 2 MODEL
+T.addGLBModel("kiti2.glb", {
+  position: [-2, -7.55, -6],
+  scale: 270,
+  name: "mySofa2",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose sofa 2 reference
+  window.mySofa2 = model;
+});
+
+// FOR CURTAIN 1 MODEL
+T.addGLBModel("curtain.glb", {
+  position: [5.6, -5, 12],
+  scale: 300,
+  name: "myCurtain",
+}).then(({ model, animations }) => {
+  
+  // ===== EXPOSE CURTAIN 1 CONTROLS =====
+  window.openCurtain1 = () => {
+    animateModelPosition(model, {
+      from: { x: model.position.x, y: -5, z: 12 },
+      to: { x: 0, y: -5, z: 12 },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  window.closeCurtain1 = () => {
+    animateModelPosition(model, {
+      from: { x: model.position.x, y: -5, z: 12 },
+      to: { x: 5.6, y: -5, z: 12 },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  // Keep original button listeners
+  let openTrig = document.getElementById("openW");
+  openTrig.addEventListener("click", window.openCurtain1);
+  let closeTrig = document.getElementById("closeW");
+  closeTrig.addEventListener("click", window.closeCurtain1);
+});
+
+// FOR CURTAIN 2 MODEL
+T.addGLBModel("curtain.glb", {
+  position: [-10.7, -5, 12],
+  scale: 300,
+  name: "myCurtain2",
+}).then(({ model, animations }) => {
+  
+  // ===== EXPOSE CURTAIN 2 CONTROLS =====
+  window.openCurtain2 = () => {
+    animateModelPosition(model, {
+      from: { x: model.position.x, y: -5, z: 12 },
+      to: { x: -15.7, y: -5, z: 12 },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  window.closeCurtain2 = () => {
+    animateModelPosition(model, {
+      from: { x: model.position.x, y: -5, z: 12 },
+      to: { x: -10.7, y: -5, z: 12 },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  // Keep original button listeners
+  let openTrig = document.getElementById("openW1");
+  openTrig.addEventListener("click", window.openCurtain2);
+  let closeTrig = document.getElementById("closeW1");
+  closeTrig.addEventListener("click", window.closeCurtain2);
+});
+
+// FOR CURTAIN 3 MODEL
+T.addGLBModel("curtain2.glb", {
+  position: [53, -5, 27],
+  scale: 300,
+  name: "myCurtain3",
+}).then(({ model, animations }) => {
+  
+  // ===== EXPOSE CURTAIN 3 CONTROLS =====
+  window.openCurtain3 = () => {
+    animateModelPosition(model, {
+      from: {
+        x: model.position.x,
+        y: model.position.y,
+        z: model.position.z,
+      },
+      to: { x: 45, y: model.position.y, z: model.position.z },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  window.closeCurtain3 = () => {
+    animateModelPosition(model, {
+      from: {
+        x: model.position.x,
+        y: model.position.y,
+        z: model.position.z,
+      },
+      to: { x: 53, y: model.position.y, z: model.position.z },
+      duration: 3,
+      loop: false,
+      yoyo: false,
+      easing: "easeInOut",
+    });
+  };
+  
+  // Keep original button listeners
+  let openTrig = document.getElementById("openW2");
+  openTrig.addEventListener("click", window.openCurtain3);
+  let closeTrig = document.getElementById("closeW2");
+  closeTrig.addEventListener("click", window.closeCurtain3);
+});
+
+// FOR DINING TABLE MODEL
+T.addGLBModel("dinning.glb", {
+  position: [3, -6, -3],
+  scale: 250,
+  name: "myDiningTable",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose dining table reference
+  window.myDiningTable = model;
+});
+
+// FOR TV MODEL
+T.addGLBModel("tv.glb", {
+  position: [-5, -11, -4],
+  scale: 270,
+  name: "myTV",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose TV reference
+  window.myTV = model;
+});
+
+// FOR GRASS GROUND MODEL
+T.addGLBModel("grass.glb", {
+  position: [0, -3.5, 0],
+  scale: 500,
+  name: "myGrass",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose grass reference
+  window.myGrass = model;
+});
+
+// FOR GLASS TABLE MODEL
+T.addGLBModel("glasstable.glb", {
+  position: [-1, -6.2, -4],
+  scale: 230,
+  name: "myGlassTable",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Expose glass table reference
+  window.myGlassTable = model;
+});
+
+// FOR FAN MODEL
+T.addGLBModel("fan.glb", {
+  position: [6, 25, 0],
+  scale: 0.8,
+  name: "myFan",
+}).then(({ model, animations }) => {
+  console.log("Model loaded!", model);
+  
+  // Spin continuously at 2 rotations per second
+  const fanAnimation = animateModelRotation(model, {
+    continuous: true,
+    speed: 1,
+    axis: "y",
+    accelerate: true,
+    accelerationTime: 3,
+  });
+  
+  let isFanOn = true;
+  
+  // ===== EXPOSE FAN CONTROLS =====
+  window.fanAnimation = fanAnimation;
+  
+  window.toggleFan = () => {
+    if (isFanOn) {
+      fanAnimation.pause();
+      isFanOn = false;
+    } else {
+      fanAnimation.resume();
+      isFanOn = true;
+    }
+  };
+  
+  window.fanOn = () => {
+    fanAnimation.resume();
+    isFanOn = true;
+  };
+  
+  window.fanOff = () => {
+    fanAnimation.pause();
+    isFanOn = false;
+  };
+  
+  window.setFanSpeed = (speed) => {
+    fanAnimation.setSpeed(speed);
+  };
+  
+  // Keep original button listener
+  let fanToggle = document.getElementById("fanToggle");
+  fanToggle.addEventListener("click", window.toggleFan);
+  
+  // Expose fan model
+  window.myFan = model;
+});
+    </script>
+
+</body>
+</html>
